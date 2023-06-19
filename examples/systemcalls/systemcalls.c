@@ -1,5 +1,10 @@
 #include "systemcalls.h"
-
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <string.h>
 /**
  * @param cmd the command to execute with system()
  * @return true if the command in @param cmd was executed
@@ -16,8 +21,7 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-
-    return true;
+    return (system(cmd) != -1);
 }
 
 /**
@@ -47,8 +51,8 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
-
+    // command[count] = command[count];
+    va_end(args);
 /*
  * TODO:
  *   Execute a system command by calling fork, execv(),
@@ -59,9 +63,36 @@ bool do_exec(int count, ...)
  *
 */
 
-    va_end(args);
+    if ( *command[0] != '/' || *command[2] != '/') {
+        // Command does not include an absolute path
+        perror("Absolute path required");
+        return false;
+    }
 
-    return true;
+    pid_t pid;
+    pid = fork();
+    if (-1 == pid){
+	    perror("failed fork");
+        return false;
+    }
+    else if (0 == pid){
+        //in child process
+        execv(command[0], command);
+        // will not reach here
+	    perror("child process failed");
+        return false;
+    }
+    else{
+        //in parent process
+        int status = 0;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+        {
+            return true;
+        }
+    }
+  
+    return false;
 }
 
 /**
@@ -84,6 +115,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     // and may be removed
     command[count] = command[count];
 
+    va_end(args);
 
 /*
  * TODO
@@ -92,8 +124,42 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    bool ret = false;
+    
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd<0){
+        perror("Failed to open file");
+        ret = false;
+        goto exit;
+    }
 
-    va_end(args);
 
-    return true;
+    pid_t pid;
+    pid = fork();
+    
+    if (pid == 0){
+        
+        if (dup2(fd,1) < 0){
+            perror("dup2 failed");
+            ret = false;
+            exit(EXIT_FAILURE);
+        }
+
+        close(fd);
+        execv(command[0], &command[0]);
+        ret = false;
+        exit(EXIT_FAILURE);    
+    }
+    else if (pid > 0){
+        close(fd);
+        int status = 0;
+        if (waitpid(pid, &status, 0) == -1)
+            ret = false;
+        if (WIFEXITED (status) == EXIT_SUCCESS)
+            ret = true;
+    }
+
+
+exit:
+    return ret;
 }
